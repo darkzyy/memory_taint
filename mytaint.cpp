@@ -1,27 +1,35 @@
 #include "pin.H"
-#include "control_manager.H"
-#include "portability.H"
-#include <vector>
 #include <iostream>
-#include <iomanip>
-#include <fstream>
+#include <list>
+#include <sys/syscall.h>
 
-typedef VOID(* LEVEL_PINCLIENT::SYSCALL_ENTRY_CALLBACK)(THREADID threadIndex,
-        CONTEXT *ctxt,
-        SYSCALL_STANDARD std,
-        VOID *v);
+/* ===================================================================== */
+/* Global Variables */
+/* ===================================================================== */
 
-typedef VOID(* LEVEL_PINCLIENT::SYSCALL_EXIT_CALLBACK)(THREADID threadIndex,
-        CONTEXT *ctxt,
-        SYSCALL_STANDARD std,
-        VOID *v);
+UINT64 ins_count = 0;
 
-VOID LEVEL_PINCLIENT::PIN_AddSyscallEntryFunction(SYSCALL_ENTRY_CALLBACK fun, VOID *val);
-VOID LEVEL_PINCLIENT::PIN_AddSyscallExitFunction(SYSCALL_EXIT_CALLBACK fun, VOID *val);
+/* ===================================================================== */
+/* Commandline Switches */
+/* ===================================================================== */
 
-typedef VOID(* LEVEL_PINCLIENT::INS_INSTRUMENT_CALLBACK)(INS ins, VOID *v);
 
-VOID LEVEL_PINCLIENT::INS_AddInstrumentFunction(INS_INSTRUMENT_CALLBACK fun, VOID *val);
+/* ===================================================================== */
+/* Print Help Message                                                    */
+/* ===================================================================== */
+
+INT32 Usage()
+{
+    cerr <<
+        "This tool prints out the number of dynamic instructions executed to stderr.\n"
+        "\n";
+
+    cerr << KNOB_BASE::StringKnobSummary();
+
+    cerr << endl;
+
+    return -1;
+}
 
 /* area of bytes tainted */
 struct range
@@ -54,18 +62,24 @@ VOID Syscall_entry(THREADID thread_id, CONTEXT *ctx, SYSCALL_STANDARD std, void 
   }
 }
 
+
+/* ===================================================================== */
+/* Main                                                                  */
+/* ===================================================================== */
+
 int main(int argc, char *argv[])
 {
-    /* Init Pin arguments */
-    if(PIN_Init(argc, argv)){
+    if( PIN_Init(argc,argv) )
+    {
         return Usage();
     }
+    
 
-    /* Add the syscall handler */
     PIN_AddSyscallEntryFunction(Syscall_entry, 0);
 
-    /* Start the program */
+    // Never returns
     PIN_StartProgram();
-
+    
     return 0;
 }
+
