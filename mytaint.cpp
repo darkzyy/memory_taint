@@ -62,6 +62,54 @@ VOID Syscall_entry(THREADID thread_id, CONTEXT *ctx, SYSCALL_STANDARD std, void 
   }
 }
 
+VOID ReadMem(UINT64 insAddr, std::string insDis, UINT64 memOp)
+{
+	list<struct range>::iterator i;
+	UINT64 addr = memOp;
+
+	for(i = bytesTainted.begin(); i != bytesTainted.end(); ++i){
+		if (addr >= i->start && addr < i->end){
+			std::cout << std::hex << "[READ in " << addr << "]\t" << insAddr 
+				<< ": " << insDis<< std::endl;
+		}
+	}
+}
+
+VOID WriteMem(UINT64 insAddr, std::string insDis, UINT64 memOp)
+{
+	list<struct range>::iterator i;
+	UINT64 addr = memOp;
+
+	for(i = bytesTainted.begin(); i != bytesTainted.end(); ++i){
+		if (addr >= i->start && addr < i->end){
+			std::cout << std::hex << "[WRITE in " << addr << "]\t" << insAddr 
+				<< ": " << insDis<< std::endl;
+		}
+	}
+}
+
+VOID Instruction(INS ins, VOID* v)
+{
+    if (INS_IsNop(ins)) {
+        return;
+    }
+
+    if (INS_MemoryOperandIsRead(ins, 0) && INS_OperandIsReg(ins, 0)){
+	  INS_InsertCall(
+		  ins, IPOINT_BEFORE, (AFUNPTR)ReadMem,
+		  IARG_ADDRINT, INS_Address(ins),
+		  IARG_PTR, new string(INS_Disassemble(ins)),
+		  IARG_MEMORYOP_EA, 0,
+		  IARG_END);
+	} else if (INS_MemoryOperandIsWritten(ins, 0)){
+	  INS_InsertCall(
+		  ins, IPOINT_BEFORE, (AFUNPTR)WriteMem,
+		  IARG_ADDRINT, INS_Address(ins),
+		  IARG_PTR, new string(INS_Disassemble(ins)),
+		  IARG_MEMORYOP_EA, 0,
+		  IARG_END);
+	}
+}
 
 /* ===================================================================== */
 /* Main                                                                  */
@@ -74,6 +122,7 @@ int main(int argc, char *argv[])
         return Usage();
     }
     
+    INS_AddInstrumentFunction(Instruction, 0);
 
     PIN_AddSyscallEntryFunction(Syscall_entry, 0);
 
