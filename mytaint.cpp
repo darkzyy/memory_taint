@@ -183,11 +183,19 @@ VOID ReadMem(INS ins, UINT64 memOp)
     }
 }
 
-VOID WriteMem(INS ins, UINT64 memOp)
+VOID WriteMem(INS ins, UINT64 memOp, UINT64 pc)
 {
     list<UINT64>::iterator i;
     UINT64 addr = memOp;
-    REG reg_r;
+
+    REG reg_r = INS_RegR(ins, 0);
+
+    if (pc == 0x80484c1) {
+        std::cout << "Tainting init Reg!\n";
+        taintReg(reg_r);
+        addMemTainted(addr);
+    }
+
 
     if (INS_OperandCount(ins) != 2)
         return;
@@ -260,6 +268,7 @@ VOID Instruction(INS ins, VOID *v)
                 ins, IPOINT_BEFORE, (AFUNPTR)WriteMem,
                 IARG_PTR, ins,
                 IARG_MEMORYOP_EA, 0,
+                IARG_INST_PTR,
                 IARG_END);
     }
     else if (INS_OperandCount(ins) > 1 && INS_OperandIsReg(ins, 0)){
@@ -301,7 +310,7 @@ int main(int argc, char *argv[])
     }
 
     PIN_SetSyntaxIntel();
-    PIN_AddSyscallEntryFunction(Syscall_entry, 0);
+    // PIN_AddSyscallEntryFunction(Syscall_entry, 0);
     INS_AddInstrumentFunction(Instruction, 0);
     PIN_StartProgram();
 
