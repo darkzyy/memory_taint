@@ -12,9 +12,12 @@
 #include <asm/unistd.h>
 #include <fstream>
 #include <iostream>
+#include <cstdio>
 #include <list>
 
-std::list<UINT64> addressTainted;
+#define HWaddr UINT32
+
+std::list<HWaddr> addressTainted;
 std::list<REG> regsTainted;
 
 INT32 Usage()
@@ -35,13 +38,13 @@ bool checkAlreadyRegTainted(REG reg)
     return false;
 }
 
-VOID removeMemTainted(UINT64 addr)
+VOID removeMemTainted(HWaddr addr)
 {
     addressTainted.remove(addr);
     std::cout << std::hex << "\t\t\t" << addr << " is now freed" << std::endl;
 }
 
-VOID addMemTainted(UINT64 addr)
+VOID addMemTainted(HWaddr addr)
 {
     addressTainted.push_back(addr);
     std::cout << std::hex << "\t\t\t" << addr << " is now tainted" << std::endl;
@@ -142,53 +145,61 @@ bool removeRegTainted(REG reg)
     return true;
 }
 
-VOID ReadMem(INS ins, UINT64 memOp)
+VOID ReadMem(HWaddr pc, std::string insDis, REG reg_r, REG reg_w,
+        int numOperand, HWaddr memOp)
 {
-    list<UINT64>::iterator i;
-    UINT64 addr = memOp;
-    REG reg_r;
+    std::cout << "Processing: [" << pc << "] as memRead: "
+        << insDis << std::endl;
 
-    if (INS_OperandCount(ins) != 2)
+    list<HWaddr>::iterator i;
+    HWaddr addr = memOp;
+
+    if (numOperand != 2)
         return;
 
-    reg_r = INS_OperandReg(ins, 0);
     for(i = addressTainted.begin(); i != addressTainted.end(); i++){
         if (addr == *i){
             std::cout << std::hex << "[READ in " << addr << "]\t"
-                << INS_Address(ins) << ": " << INS_Disassemble(ins) << std::endl;
+                << pc << ": " <<insDis << std::endl;
             taintReg(reg_r);
             return ;
         }
     }
     if (checkAlreadyRegTainted(reg_r)){
         std::cout << std::hex << "[READ in " << addr << "]\t"
-            << INS_Address(ins) << ": " << INS_Disassemble(ins) << std::endl;
+            << pc << ": " <<insDis << std::endl;
         removeRegTainted(reg_r);
     }
 }
 
-VOID WriteMem(INS ins, UINT64 memOp, UINT64 pc)
+VOID WriteMem(HWaddr pc, std::string insDis, REG reg_r, REG reg_w,
+        int numOperand, HWaddr memOp)
 {
-    list<UINT64>::iterator i;
-    UINT64 addr = memOp;
+    std::cout << "Processing: [" << pc << "] as memWrite: "
+        <<insDis << std::endl;
 
-    REG reg_r = INS_RegR(ins, 0);
+    list<HWaddr>::iterator i;
+    HWaddr addr = memOp;
 
+
+    //std::cout << pc << endl;
     if (pc == 0x80484c1) {
+        REG reg_a = REG_AL;
         std::cout << "Tainting init Reg!\n";
-        taintReg(reg_r);
+        taintReg(reg_a);
         addMemTainted(addr);
+        return;
     }
 
 
-    if (INS_OperandCount(ins) != 2)
+    if (numOperand != 2)
         return;
 
-    reg_r = INS_OperandReg(ins, 1);
+    reg_r = reg_w;
     for(i = addressTainted.begin(); i != addressTainted.end(); i++){
         if (addr == *i){
             std::cout << std::hex << "[WRITE in " << addr << "]\t"
-                << INS_Address(ins) << ": " << INS_Disassemble(ins) << std::endl;
+                << pc << ": " <<insDis << std::endl;
             if (!REG_valid(reg_r) || !checkAlreadyRegTainted(reg_r))
                 removeMemTainted(addr);
             return ;
@@ -196,26 +207,38 @@ VOID WriteMem(INS ins, UINT64 memOp, UINT64 pc)
     }
     if (checkAlreadyRegTainted(reg_r)){
         std::cout << std::hex << "[WRITE in " << addr << "]\t"
-            << INS_Address(ins) << ": " << INS_Disassemble(ins) << std::endl;
+            << pc << ": " <<insDis << std::endl;
         addMemTainted(addr);
     }
 }
 
-VOID spreadRegTaint(INS ins)
+VOID spreadRegTaint(HWaddr pc, std::string insDis, REG reg_r, REG reg_w,
+        int numOperand)
 {
-    REG reg_r, reg_w;
+    std::cout << "Processing: [" << pc << "] as R2R: "
+        << insDis << std::endl;
 
-    if (INS_OperandCount(ins) != 2)
+
+    if (numOperand != 2) {
+        std::cout << "Ignored: [" << pc << "]" << insDis << std::endl;
         return;
+    }
 
-    reg_r = INS_RegR(ins, 0);
-    reg_w = INS_RegW(ins, 0);
+
+    if (REG_valid(reg_w)) {
+        cout << REG_StringShort(reg_w) << " Tainted? : "
+            << checkAlreadyRegTainted(reg_w) <<endl;
+    }
+    if (REG_valid(reg_r)) {
+        cout << REG_StringShort(reg_r) << " Tainted? : "
+            << checkAlreadyRegTainted(reg_r) <<endl;
+    }
 
     if (REG_valid(reg_w)){
         if (checkAlreadyRegTainted(reg_w) && (!REG_valid(reg_r) ||
                     !checkAlreadyRegTainted(reg_r))){
-            std::cout << "[SPREAD]\t\t" << INS_Address(ins) << ": "
-                << INS_Disassemble(ins) << std::endl;
+            std::cout << "[SPREAD]\t\t" << pc << ": "
+                << insDis << std::endl;
             std::cout << "\t\t\toutput: "<< REG_StringShort(reg_w)
                 << " | input: "
                 << (REG_valid(reg_r) ? REG_StringShort(reg_r) : "constant")
@@ -225,40 +248,56 @@ VOID spreadRegTaint(INS ins)
         else if (!checkAlreadyRegTainted(reg_w)
                 && checkAlreadyRegTainted(reg_r)){
 
-            std::cout << "[SPREAD]\t\t" << INS_Address(ins) << ": "
-                << INS_Disassemble(ins) << std::endl;
+            std::cout << "[SPREAD]\t\t" << pc << ": "
+                << insDis << std::endl;
             std::cout << "\t\t\toutput: " << REG_StringShort(reg_w)
                 << " | input: "<< REG_StringShort(reg_r) << std::endl;
             taintReg(reg_w);
         }
+    }
+    else {
+        cout <<"Regw not valid!\n";
     }
 }
 
 VOID Instruction(INS ins, VOID *v)
 {
     if (INS_IsNop(ins)) {
+        std::cout << "Not Processed: [" << IARG_INST_PTR << "]"
+            << INS_Disassemble(ins) << std::endl;
         return;
     }
     if (INS_OperandCount(ins) > 1 && INS_MemoryOperandIsRead(ins, 0)
             && INS_OperandIsReg(ins, 0)){
         INS_InsertCall(
                 ins, IPOINT_BEFORE, (AFUNPTR)ReadMem,
-                IARG_PTR, ins,
+                IARG_UINT32, INS_Address(ins),
+                IARG_PTR, new string(INS_Disassemble(ins)),
+                IARG_UINT32, INS_OperandReg(ins, 0),
+                IARG_UINT32, INS_OperandReg(ins, 1),
+                IARG_UINT32, INS_OperandCount(ins),
                 IARG_MEMORYOP_EA, 0,
                 IARG_END);
     }
     else if (INS_OperandCount(ins) > 1 && INS_MemoryOperandIsWritten(ins, 0)){
         INS_InsertCall(
                 ins, IPOINT_BEFORE, (AFUNPTR)WriteMem,
-                IARG_PTR, ins,
+                IARG_UINT32, INS_Address(ins),
+                IARG_PTR, new string(INS_Disassemble(ins)),
+                IARG_UINT32, INS_OperandReg(ins, 0),
+                IARG_UINT32, INS_OperandReg(ins, 1),
+                IARG_UINT32, INS_OperandCount(ins),
                 IARG_MEMORYOP_EA, 0,
-                IARG_INST_PTR,
                 IARG_END);
     }
     else if (INS_OperandCount(ins) > 1 && INS_OperandIsReg(ins, 0)){
         INS_InsertCall(
                 ins, IPOINT_BEFORE, (AFUNPTR)spreadRegTaint,
-                IARG_PTR, ins,
+                IARG_UINT32, INS_Address(ins),
+                IARG_PTR, new string(INS_Disassemble(ins)),
+                IARG_UINT32, INS_OperandReg(ins, 0),
+                IARG_UINT32, INS_OperandReg(ins, 1),
+                IARG_UINT32, INS_OperandCount(ins),
                 IARG_END);
     }
 }
@@ -270,20 +309,29 @@ static unsigned int tryksOpen;
 VOID Syscall_entry(THREADID thread_id, CONTEXT *ctx, SYSCALL_STANDARD std, void *v)
 {
     unsigned int i;
-    UINT64 start, size;
+    HWaddr start, size;
 
     if (PIN_GetSyscallNumber(ctx, std) == __NR_read){
 
         TRICKS(); /* tricks to ignore the first open */
 
-        start = static_cast<UINT64>((PIN_GetSyscallArgument(ctx, std, 1)));
-        size  = static_cast<UINT64>((PIN_GetSyscallArgument(ctx, std, 2)));
+        start = static_cast<HWaddr>((PIN_GetSyscallArgument(ctx, std, 1)));
+        size  = static_cast<HWaddr>((PIN_GetSyscallArgument(ctx, std, 2)));
 
         for (i = 0; i < size; i++)
             addressTainted.push_back(start+i);
 
         std::cout << "[TAINT]\t\t\tbytes tainted from " << std::hex << "0x"
             << start << " to 0x" << start+size << " (via read)"<< std::endl;
+    }
+}
+
+VOID Fini(int, VOID *v)
+{
+    list<HWaddr>::iterator i;
+    std::cout << "Tainted Memory:\n";
+    for(i = addressTainted.begin(); i != addressTainted.end(); i++){
+        std::cout << "0x" << std::hex << *i << endl;
     }
 }
 
@@ -296,6 +344,7 @@ int main(int argc, char *argv[])
     PIN_SetSyntaxIntel();
     // PIN_AddSyscallEntryFunction(Syscall_entry, 0);
     INS_AddInstrumentFunction(Instruction, 0);
+    PIN_AddFiniFunction(Fini, 0);
     PIN_StartProgram();
 
     return 0;
