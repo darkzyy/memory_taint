@@ -148,8 +148,7 @@ bool removeRegTainted(REG reg)
 VOID ReadMem(HWaddr pc, std::string insDis, REG reg_r, REG reg_w,
         int numOperand, HWaddr memOp)
 {
-    std::cout << "Processing: [" << pc << "] as memRead: "
-        << insDis << std::endl;
+    // std::cout << "Processing: [" << pc << "] as memRead: " << insDis << std::endl;
 
     list<HWaddr>::iterator i;
     HWaddr addr = memOp;
@@ -175,8 +174,7 @@ VOID ReadMem(HWaddr pc, std::string insDis, REG reg_r, REG reg_w,
 VOID WriteMem(HWaddr pc, std::string insDis, REG reg_r, REG reg_w,
         int numOperand, HWaddr memOp)
 {
-    std::cout << "Processing: [" << pc << "] as memWrite: "
-        <<insDis << std::endl;
+    // std::cout << "Processing: [" << pc << "] as memWrite: " <<insDis << std::endl;
 
     list<HWaddr>::iterator i;
     HWaddr addr = memOp;
@@ -215,16 +213,16 @@ VOID WriteMem(HWaddr pc, std::string insDis, REG reg_r, REG reg_w,
 VOID spreadRegTaint(HWaddr pc, std::string insDis, REG reg_r, REG reg_w,
         int numOperand)
 {
-    std::cout << "Processing: [" << pc << "] as R2R: "
-        << insDis << std::endl;
+    //std::cout << "Processing: [" << pc << "] as R2R: " << insDis << std::endl;
 
 
     if (numOperand != 2) {
-        std::cout << "Ignored: [" << pc << "]" << insDis << std::endl;
+        // std::cout << "Ignored: [" << pc << "]" << insDis << std::endl;
         return;
     }
 
 
+    /*
     if (REG_valid(reg_w)) {
         cout << REG_StringShort(reg_w) << " Tainted? : "
             << checkAlreadyRegTainted(reg_w) <<endl;
@@ -233,6 +231,7 @@ VOID spreadRegTaint(HWaddr pc, std::string insDis, REG reg_r, REG reg_w,
         cout << REG_StringShort(reg_r) << " Tainted? : "
             << checkAlreadyRegTainted(reg_r) <<endl;
     }
+    */
 
     if (REG_valid(reg_w)){
         if (checkAlreadyRegTainted(reg_w) && (!REG_valid(reg_r) ||
@@ -254,9 +253,6 @@ VOID spreadRegTaint(HWaddr pc, std::string insDis, REG reg_r, REG reg_w,
                 << " | input: "<< REG_StringShort(reg_r) << std::endl;
             taintReg(reg_w);
         }
-    }
-    else {
-        cout <<"Regw not valid!\n";
     }
 }
 
@@ -295,8 +291,8 @@ VOID Instruction(INS ins, VOID *v)
                 ins, IPOINT_BEFORE, (AFUNPTR)spreadRegTaint,
                 IARG_UINT32, INS_Address(ins),
                 IARG_PTR, new string(INS_Disassemble(ins)),
-                IARG_UINT32, INS_OperandReg(ins, 0),
-                IARG_UINT32, INS_OperandReg(ins, 1),
+                IARG_UINT32, INS_RegR(ins, 0),
+                IARG_UINT32, INS_RegW(ins, 0),
                 IARG_UINT32, INS_OperandCount(ins),
                 IARG_END);
     }
