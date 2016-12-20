@@ -27,6 +27,15 @@ TaintNode *map = NULL;
 
 std::list<REG> regsTainted;
 
+VOID Fini(int, VOID *v)
+{
+    std::cout << "Tainted Memory:\n";
+    TaintNode *tn;
+    for (tn = map; tn != NULL; tn = (TaintNode *)tn->hh.next) {
+        std::cout << "0x" << std::hex << tn->addressTainted << endl;
+    }
+}
+
 INT32 Usage()
 {
     cerr << "Ex 2" << endl;
@@ -63,6 +72,7 @@ VOID removeMemTainted(HWaddr addr, int nbytes)
 
 VOID addMemTainted(HWaddr addr, int nbytes)
 {
+    cout << "Adding " << nbytes << " bytes\n";
     HWaddr addr_start = addr;
     for (int i = 0; i < nbytes; i++) {
         addr = addr_start + i;
@@ -70,9 +80,13 @@ VOID addMemTainted(HWaddr addr, int nbytes)
         HASH_FIND_INT( map, &addr, tn );
         if (tn == NULL) {
             TaintNode *t = new TaintNode;
+            t->addressTainted = addr;
             HASH_ADD_INT( map, addressTainted, t);
             std::cout << std::hex << "\t\t\t" << addr
                 << " is now tainted" << std::endl;
+        } else {
+            std::cout << std::hex << "\t\t\t" << addr
+                << " has already been tainted" << std::endl;
         }
     }
 }
@@ -176,15 +190,18 @@ VOID ReadMem(HWaddr pc, std::string insDis, REG reg_r, REG reg_w,
         int numOperand, HWaddr memOp, int nbytes)
 {
     std::cout << "Processing: [" << pc << "] as memRead: " << insDis
-        << "bytes=" << nbytes << " Reading " << memOp << std::endl;
+        << " bytes=" << nbytes << " Reading " << memOp << std::endl;
 
-    list<TaintNode>::iterator i;
     HWaddr addr_start = memOp;
     HWaddr addr;
 
 
     if (numOperand != 2)
         return;
+
+    if (pc == 0x8048501) {
+        Fini(0, (VOID *)0);
+    }
 
     for (int i = 0; i < nbytes; i++) {
         addr = addr_start + i;
@@ -208,9 +225,9 @@ VOID ReadMem(HWaddr pc, std::string insDis, REG reg_r, REG reg_w,
 VOID WriteMem(HWaddr pc, std::string insDis, REG reg_r, REG reg_w,
         int numOperand, HWaddr memOp, int nbytes)
 {
-    // std::cout << "Processing: [" << pc << "] as memWrite: " <<insDis << std::endl;
+    std::cout << "Processing: [" << pc << "] as memRead: " << insDis
+        << " bytes=" << nbytes << " Writing " << memOp << std::endl;
 
-    list<TaintNode>::iterator i;
     HWaddr addr_start = memOp;
     HWaddr addr;
     reg_r = reg_w;
@@ -245,10 +262,7 @@ VOID WriteMem(HWaddr pc, std::string insDis, REG reg_r, REG reg_w,
     if (checkAlreadyRegTainted(reg_r)){
         std::cout << std::hex << "[WRITE in " << addr_start << "]\t"
             << pc << ": " <<insDis << std::endl;
-        for (int i = 0; i < nbytes; i++) {
-            addr = addr_start + i;
-            addMemTainted(addr, nbytes);
-        }
+        addMemTainted(addr_start, nbytes);
     }
 }
 
@@ -339,16 +353,6 @@ VOID Instruction(INS ins, VOID *v)
                 IARG_UINT32, INS_RegW(ins, 0),
                 IARG_UINT32, INS_OperandCount(ins),
                 IARG_END);
-    }
-}
-
-VOID Fini(int, VOID *v)
-{
-    list<TaintNode>::iterator i;
-    std::cout << "Tainted Memory:\n";
-    TaintNode *tn;
-    for (tn = map; tn != NULL; tn = (TaintNode *)tn->hh.next) {
-        std::cout << "0x" << std::hex << tn->addressTainted << endl;
     }
 }
 
