@@ -174,7 +174,7 @@ VOID ReadMem(HWaddr pc, std::string insDis, REG reg_r, REG reg_w,
     for(i = table.begin(); i != table.end(); i++){
         if (addr == i->addressTainted){
             std::cout << std::hex << "[READ in " << addr << "]\t"
-                << pc << ": " <<insDis << std::endl;
+                << pc << ": " <<insDis <<"@[" << memOp << "]" << std::endl;
             taintReg(reg_r);
             return ;
         }

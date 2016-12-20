@@ -14,15 +14,17 @@
 #include <iostream>
 #include <cstdio>
 #include <list>
+#include "uthash.h"
 
 #define HWaddr UINT32
 
 struct TaintNode {
     HWaddr addressTainted;
-    int len;
+    UT_hash_handle hh;
 };
 
-std::list<TaintNode> table;
+TaintNode *map = NULL;
+
 std::list<REG> regsTainted;
 
 INT32 Usage()
@@ -43,26 +45,36 @@ bool checkAlreadyRegTainted(REG reg)
     return false;
 }
 
-VOID removeMemTainted(HWaddr addr)
+VOID removeMemTainted(HWaddr addr, int nbytes)
 {
-    list<TaintNode>::iterator i = table.begin();
-    while (i != table.end()) {
-        if (i->addressTainted == addr) {
-            i = table.erase(i);
-        } else {
-            i++;
+    HWaddr addr_start = addr;
+    for (int i = 0; i < nbytes; i++) {
+        addr = addr_start + i;
+        TaintNode *tn = NULL;
+        HASH_FIND_INT( map, &addr, tn );
+        if (tn != NULL) {
+            HASH_DEL( map, tn );
+            delete tn;
+            std::cout << std::hex << "\t\t\t" << addr
+                << " is now freed" << std::endl;
         }
     }
-    std::cout << std::hex << "\t\t\t" << addr << " is now freed" << std::endl;
 }
 
 VOID addMemTainted(HWaddr addr, int nbytes)
 {
-    TaintNode t;
-    t.addressTainted = addr;
-    t.len = nbytes;
-    table.push_back(t);
-    std::cout << std::hex << "\t\t\t" << addr << " is now tainted" << std::endl;
+    HWaddr addr_start = addr;
+    for (int i = 0; i < nbytes; i++) {
+        addr = addr_start + i;
+        TaintNode *tn;
+        HASH_FIND_INT( map, &addr, tn );
+        if (tn == NULL) {
+            TaintNode *t = new TaintNode;
+            HASH_ADD_INT( map, addressTainted, t);
+            std::cout << std::hex << "\t\t\t" << addr
+                << " is now tainted" << std::endl;
+        }
+    }
 }
 
 bool taintReg(REG reg)
@@ -161,26 +173,33 @@ bool removeRegTainted(REG reg)
 }
 
 VOID ReadMem(HWaddr pc, std::string insDis, REG reg_r, REG reg_w,
-        int numOperand, HWaddr memOp)
+        int numOperand, HWaddr memOp, int nbytes)
 {
-    // std::cout << "Processing: [" << pc << "] as memRead: " << insDis << std::endl;
+    std::cout << "Processing: [" << pc << "] as memRead: " << insDis
+        << "bytes=" << nbytes << " Reading " << memOp << std::endl;
 
     list<TaintNode>::iterator i;
-    HWaddr addr = memOp;
+    HWaddr addr_start = memOp;
+    HWaddr addr;
+
 
     if (numOperand != 2)
         return;
 
-    for(i = table.begin(); i != table.end(); i++){
-        if (addr == i->addressTainted){
+    for (int i = 0; i < nbytes; i++) {
+        addr = addr_start + i;
+        TaintNode *tn;
+        HASH_FIND_INT( map, &addr, tn );
+        if (tn != NULL) {
             std::cout << std::hex << "[READ in " << addr << "]\t"
                 << pc << ": " <<insDis << std::endl;
             taintReg(reg_r);
             return ;
         }
     }
+
     if (checkAlreadyRegTainted(reg_r)){
-        std::cout << std::hex << "[READ in " << addr << "]\t"
+        std::cout << std::hex << "[READ in " << addr_start << "]\t"
             << pc << ": " <<insDis << std::endl;
         removeRegTainted(reg_r);
     }
@@ -192,7 +211,8 @@ VOID WriteMem(HWaddr pc, std::string insDis, REG reg_r, REG reg_w,
     // std::cout << "Processing: [" << pc << "] as memWrite: " <<insDis << std::endl;
 
     list<TaintNode>::iterator i;
-    HWaddr addr = memOp;
+    HWaddr addr_start = memOp;
+    HWaddr addr;
     reg_r = reg_w;
 
 
@@ -209,19 +229,26 @@ VOID WriteMem(HWaddr pc, std::string insDis, REG reg_r, REG reg_w,
     if (numOperand != 2)
         return;
 
-    for(i = table.begin(); i != table.end(); i++){
-        if (addr == i->addressTainted){
+    for (int i = 0; i < nbytes; i++) {
+        addr = addr_start + i;
+        TaintNode *tn;
+        HASH_FIND_INT( map, &addr, tn );
+        if (tn != NULL) {
             std::cout << std::hex << "[WRITE in " << addr << "]\t"
                 << pc << ": " <<insDis << std::endl;
             if (!REG_valid(reg_r) || !checkAlreadyRegTainted(reg_r))
-                removeMemTainted(addr);
+                removeMemTainted(addr, nbytes);
             return ;
         }
     }
+
     if (checkAlreadyRegTainted(reg_r)){
-        std::cout << std::hex << "[WRITE in " << addr << "]\t"
+        std::cout << std::hex << "[WRITE in " << addr_start << "]\t"
             << pc << ": " <<insDis << std::endl;
-        addMemTainted(addr, nbytes);
+        for (int i = 0; i < nbytes; i++) {
+            addr = addr_start + i;
+            addMemTainted(addr, nbytes);
+        }
     }
 }
 
@@ -288,6 +315,7 @@ VOID Instruction(INS ins, VOID *v)
                 IARG_UINT32, INS_OperandReg(ins, 1),
                 IARG_UINT32, INS_OperandCount(ins),
                 IARG_MEMORYOP_EA, 0,
+                IARG_UINT32, INS_OperandWidth(ins, 1)/8,
                 IARG_END);
     }
     else if (INS_OperandCount(ins) > 1 && INS_MemoryOperandIsWritten(ins, 0)){
@@ -314,43 +342,13 @@ VOID Instruction(INS ins, VOID *v)
     }
 }
 
-static unsigned int tryksOpen;
-
-#define TRICKS(){if (tryksOpen++ == 0)return;}
-
-VOID Syscall_entry(THREADID thread_id, CONTEXT *ctx, SYSCALL_STANDARD std, void *v)
-{
-    unsigned int i;
-    HWaddr start, size;
-
-    if (PIN_GetSyscallNumber(ctx, std) == __NR_read){
-
-        TRICKS(); /* tricks to ignore the first open */
-
-        start = static_cast<HWaddr>((PIN_GetSyscallArgument(ctx, std, 1)));
-        size  = static_cast<HWaddr>((PIN_GetSyscallArgument(ctx, std, 2)));
-
-        for (i = 0; i < size; i++) {
-            TaintNode t;
-            t.addressTainted = start+i;
-            t.len = 1;
-            table.push_back(t);
-        }
-
-        std::cout << "[TAINT]\t\t\tbytes tainted from " << std::hex << "0x"
-            << start << " to 0x" << start+size << " (via read)"<< std::endl;
-    }
-}
-
 VOID Fini(int, VOID *v)
 {
     list<TaintNode>::iterator i;
     std::cout << "Tainted Memory:\n";
-    for(i = table.begin(); i != table.end(); i++){
-        std::cout << ": 0x" << std::hex << i->addressTainted << endl;
-        for (int j = 0; j < i->len; j++) {
-            std::cout << "0x" << std::hex << i->addressTainted + j << endl;
-        }
+    TaintNode *tn;
+    for (tn = map; tn != NULL; tn = (TaintNode *)tn->hh.next) {
+        std::cout << "0x" << std::hex << tn->addressTainted << endl;
     }
 }
 
